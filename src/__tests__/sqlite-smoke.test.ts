@@ -6,13 +6,15 @@ import Database from 'better-sqlite3';
 describe('better-sqlite3 in the jest-expo test environment', () => {
   let db: Database.Database;
 
+  beforeAll(() => {
+    db = new Database(':memory:');
+  });
+
   afterAll(() => {
     db.close();
   });
 
   it('opens an in-memory database and round-trips a row', () => {
-    db = new Database(':memory:');
-
     db.exec('CREATE TABLE greeting (id INTEGER PRIMARY KEY, message TEXT NOT NULL)');
     db.prepare('INSERT INTO greeting (id, message) VALUES (?, ?)').run(1, 'hello from better-sqlite3');
 
