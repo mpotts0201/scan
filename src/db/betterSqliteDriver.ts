@@ -6,23 +6,24 @@ import type { DbDriver, SqlParams, SqlValue } from './driver';
 export function openBetterSqliteDriver(filename = ':memory:'): Promise<DbDriver> {
   const db = new Database(filename);
 
+  // Every method is `async` even though better-sqlite3 is synchronous: that is
+  // what turns its synchronous throws into rejections, as DbDriver promises.
   const driver: DbDriver = {
-    exec(sql: string): Promise<void> {
+    async exec(sql: string): Promise<void> {
       db.exec(sql);
-      return Promise.resolve();
     },
 
-    run(sql: string, params: SqlParams = []) {
+    async run(sql: string, params: SqlParams = []) {
       const result = db.prepare<SqlValue[]>(sql).run(...params);
-      return Promise.resolve({
+      return {
         changes: result.changes,
         // `lastInsertRowid` is `number | bigint`; the interface promises a number.
         lastInsertRowId: Number(result.lastInsertRowid),
-      });
+      };
     },
 
-    query<T>(sql: string, params: SqlParams = []): Promise<T[]> {
-      return Promise.resolve(db.prepare<SqlValue[], T>(sql).all(...params));
+    async query<T>(sql: string, params: SqlParams = []): Promise<T[]> {
+      return db.prepare<SqlValue[], T>(sql).all(...params);
     },
 
     // See expoDriver.ts: explicit statements, not `db.transaction()`, which
@@ -43,9 +44,8 @@ export function openBetterSqliteDriver(filename = ':memory:'): Promise<DbDriver>
       }
     },
 
-    close(): Promise<void> {
+    async close(): Promise<void> {
       db.close();
-      return Promise.resolve();
     },
   };
 
