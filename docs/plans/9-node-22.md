@@ -203,8 +203,8 @@ scratch copy of this branch, so the compatibility claim is measured, not inferre
 5. `expo`, `react-native`, `jest`, `jest-expo`, `@testing-library/react-native`,
    `react-test-renderer` and every runtime `dependency` are untouched in `package.json`, with
    unchanged lockfile entries.
-6. `git diff main...HEAD --stat`, excluding `package-lock.json` and `docs/plans/`, is **under ~40
-   lines** — five functional lines plus comments and the DECISIONS.md amendment. No `.ts`/`.tsx`
+6. `git diff main...HEAD --stat`, excluding `package-lock.json` and `docs/plans/`, is **51 lines (+46/−5)** —
+   measured on the final branch: five functional lines plus comments and the DECISIONS.md amendment. No `.ts`/`.tsx`
    file is touched at all. A larger diff means something out of scope got in.
 
 ## 7. Test surface and DECISIONS.md
@@ -260,10 +260,24 @@ not rewritten.
    issue specifies 22, and `better-sqlite3@13` is N-API so the choice is not coupled to the pin —
    the same `linux-x64.node` serves both. Taking 22 means repeating this inside ~20 months; 24 is a
    one-character difference. Human call; the plan implements the issue as written.
-2. **`FROM node:22` itself is unverifiable by any agent** — only a human rebuilding the container
-   proves the image works. Everything measured here ran under `npx node@22` (v22.23.2) inside the
-   *existing* node:20 image, and CI proves the `ubuntu-latest` path. The `npm_config_nodedir` value
-   is the one exception: `/usr/local/include/node` was confirmed in the pulled `node:22` image.
+2. **The devcontainer rebuild is mandatory after merge, not confirmatory.** `FROM node:22` is
+   unverifiable by any agent — only a human rebuilding the image proves it works — and until that
+   rebuild happens **this branch is broken in the current `node:20` devcontainer**. code-auditor
+   reproduced it: `npx jest` on this branch fails with `A jest worker process ... was terminated by
+   another process: signal=SIGSEGV` in `sqlite-smoke.test.ts`. Cause: `better-sqlite3@13`'s prebuild
+   is built at `NAPI_VERSION=10`, and Node 20 caps at N-API 9 (`process.versions.napi` is 9 on
+   v20.20.2, 10 on v22.23.2). `require()` of the addon *succeeds*; `new Database(':memory:')`
+   segfaults the worker, and no diagnostic anywhere names the Node version. So a stale Node-20
+   checkout does not get a clean engine error — it gets a segfault. Rebuild the devcontainer
+   immediately after merge. Everything measured in this plan ran under `npx node@22` (v22.23.2)
+   inside the *existing* node:20 image, and CI proves the `ubuntu-latest` path; `npm_config_nodedir`
+   is the one image-level fact confirmed directly (`/usr/local/include/node` is present in the
+   pulled `node:22` image).
+
+   **Related, and deferred (code-auditor SHOULD):** `package.json` declares no `engines` field and
+   the repo has no `.nvmrc`, so nothing fails fast on the Node version — the segfault above is
+   currently the first signal a developer gets. Neither file is in this issue's §3 module map, so
+   this is **proposed as a follow-up issue for the human**, not done here.
 3. **npm cache size.** 13.x ships all 8 platform prebuilds in one 11.4 MB tarball, where 12.9.0
    downloaded a single ABI-specific binary post-install. CI's `cache: npm` grows roughly that much.
    Not worth acting on; noted so it is not mistaken for a regression.
@@ -284,3 +298,13 @@ anyway. **Failure mode:** test-programmer's `npm ci` in the devcontainer exited 
 firewall blocks. Credit to them for tracing it to the manifest read rather than filing a flaky
 install. **Ruling:** point node-gyp at the headers `node:22` already ships rather than dropping back
 to 12.x; CI unchanged; the literal-AC conflict goes to the human as §9 Q0.
+
+### 2026-09-02 — post-review documentation edits (no code)
+
+Applied after code-reviewer/code-auditor passes, docs only: §9 Q2 raised from "unverifiable" to a
+mandatory post-merge rebuild, carrying the auditor's reproduced Node-20 `SIGSEGV` (N-API 10 prebuild
+vs. Node 20's N-API 9) plus the deferred `engines`/`.nvmrc` follow-up; §6 item 6's stale "under ~40
+lines" corrected to the measured **51 (+46/−5)**; and the DECISIONS.md amendment block gained an
+"Instead of" line (12.11.1-on-22, or blocking on npm/cli#9859) and an explicit note that it
+reinstates a lighter form of the headers/toolchain dependency the original entry avoided. No
+interface, dependency, or implementation change.

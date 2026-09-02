@@ -70,6 +70,15 @@ which the container firewall blocks. Net: `npm ci` now depends on python3 and
 make (present in both `node:22` and `ubuntu-latest`) but never on a C++
 compile. `@types/better-sqlite3` stays at `^9.6.0` (DefinitelyTyped latest;
 better-sqlite3 ships no `.d.ts` of its own, so it is still required).
+**Instead of (for this amendment):** `better-sqlite3@^12.11.1` on Node 22 — at
+ABI 127 `prebuild-install` fetches the binary from GitHub release assets, which
+is literally zero node-gyp, but leaves us off the current major and back on
+ABI-keyed prebuilds — or blocking on npm/cli#9859 until it lands.
+**Honestly:** this reinstates a lighter form of the exact headers/toolchain
+dependency the original "Because" above avoided; accepted because the failure is
+now loud (missing headers → node-gyp's configure step fails outright) rather than
+a silent slow source compile, and because python3 and make are present in both
+`node:22` and `ubuntu-latest`.
 **Unchanged and still binding:** the Jest 29, `@types/jest` 29, RNTL 13,
 `react-test-renderer` 19.1.0 and `jest-expo@~54.0.18` pins above — those are
 coupled to `jest-expo@54`, not to the Node version, and nothing here revisits
