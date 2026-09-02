@@ -95,17 +95,22 @@ describe('migrate()', () => {
     );
   });
 
-  it('rolls back a failing migration entirely: nothing applied, nothing recorded', async () => {
+  it('rolls back a failing migration entirely: nothing applied, nothing recorded, later versions not attempted', async () => {
     const badMigration: Migration = {
       version: 1,
       name: 'bad',
       statements: ['CREATE TABLE good_table (id INTEGER)', 'NOT VALID SQL'],
     };
-    await expect(migrate(db, [badMigration])).rejects.toThrow();
+    const laterMigration: Migration = {
+      version: 2,
+      name: 'later',
+      statements: ['CREATE TABLE later_table (id INTEGER)'],
+    };
+    await expect(migrate(db, [badMigration, laterMigration])).rejects.toThrow();
     expect(await db.query<MigrationsRow>('SELECT * FROM migrations')).toHaveLength(0);
     expect(
       await db.query<SqliteMasterRow>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'good_table'",
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('good_table', 'later_table')",
       ),
     ).toHaveLength(0);
   });
