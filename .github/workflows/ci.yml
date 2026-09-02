@@ -25,6 +25,5 @@ jobs:
       - name: Bundle builds
         run: npm run export:check
 
-      # Uncomment once test-programmer has set up jest-expo (issue for it):
-      # - name: Tests
-      #   run: npx jest --ci
+      - name: Tests
+        run: npx jest --ci
