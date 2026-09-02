@@ -196,3 +196,20 @@ using on device (its `execSync`/`runSync` exist but block the JS thread), or a
 third driver appears (e.g. `node:sqlite`, which would let tests drop the
 better-sqlite3 devDependency and its native addon entirely — worth checking once
 it is out of Node's experimental status).
+
+**Amendment 2026-09-02 (issue #2) — `metro.config.js` adds `wasm` to
+`assetExts`:** `src/db/expoDriver.ts` is the first module to import
+`expo-sqlite`, which puts `expo-sqlite/web/worker.ts` and its
+`import './wa-sqlite/wa-sqlite.wasm'` in Metro's web graph. Metro's default
+`assetExts` excludes `.wasm`, so `npm run export:check` fails to resolve it
+(verified both ways). A six-line `metro.config.js` extending
+`expo/metro-config` with `config.resolver.assetExts.push('wasm')` — the
+Expo-documented setup for expo-sqlite on web — restores it. **Instead of**
+stubbing the driver behind `expoDriver.web.ts`, which would make `export:check`
+pass by proving less than before, or dropping the check. The COEP/COOP
+dev-server headers Expo documents alongside it are deliberately omitted: web is
+a bundle-health check here, not a supported target (see the Expo Go entry
+below), and headers we never exercise are cargo cult. **Revisit when:** web
+becomes a real target (then add the headers and test them), or Expo ships
+`wasm` in the default `assetExts`, making the file deletable — until then it
+must not be deleted as "unused" just because nothing under `src/` imports it.

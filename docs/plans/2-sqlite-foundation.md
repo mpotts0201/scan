@@ -35,6 +35,7 @@ Node and the expo driver is **not** unit-testable — see §7.
 | `src/db/migrations/index.ts` | lead-programmer | The ordered `MIGRATIONS` array. |
 | `src/db/index.ts` | lead-programmer | `initDatabase()` — open + migrate. |
 | `App.tsx` | lead-programmer | Minimal init call (§6). |
+| `metro.config.js` | lead-programmer | App config; `wasm` in `assetExts` (§11 amendment). |
 | `src/db/__tests__/**` | test-programmer | All tests. |
 | `src/__tests__/sqlite-smoke.test.ts` | test-programmer | **Delete** (§7). |
 | `DECISIONS.md`, `docs/plans/2-sqlite-foundation.md` | architect | §8 and this file. |
@@ -61,6 +62,7 @@ argument plan #1 §4.4 made for `better-sqlite3` living in the repo at all.
 | `src/db/migrations/index.ts` | create | `MIGRATIONS` — the ordered list; the only place a new migration is registered. |
 | `src/db/index.ts` | create | `DATABASE_NAME`, `initDatabase()` — open expo-sqlite and run pending migrations, memoised. |
 | `App.tsx` | change | Call `initDatabase()` on mount; render its failure instead of swallowing it (§6). |
+| `metro.config.js` | create | Six lines: `expo/metro-config` + `assetExts.push('wasm')`, so `export:check` can resolve `wa-sqlite.wasm` (§11). |
 | `src/db/__tests__/migrate.test.ts` | create | Runner properties (§7). |
 | `src/db/__tests__/schema.test.ts` | create | Round-trips against schema v1 (§7). |
 | `src/__tests__/sqlite-smoke.test.ts` | delete | Superseded (§7). |
@@ -123,10 +125,12 @@ export function openExpoDriver(
 
 Maps to verified `expo-sqlite@16.0.10` API: `openDatabaseAsync`, `execAsync(source)`,
 `runAsync(source, params)` → `{ changes, lastInsertRowId }`, `getAllAsync<T>(source, params)`,
-`withTransactionAsync(task: () => Promise<void>)`, `closeAsync()`. Because `withTransactionAsync`'s
-task must resolve to `void`, the driver captures `work`'s result in a closure variable and returns
-it after the transaction resolves. Use `withTransactionAsync`, **not**
-`withExclusiveTransactionAsync` — the latter opens a second connection and throws on web.
+`closeAsync()`. `transaction` issues `execAsync('BEGIN' | 'COMMIT' | 'ROLLBACK')` directly — the
+same statements `withTransactionAsync` runs internally — rather than calling
+`withTransactionAsync`, so that both drivers share one code path and one set of semantics (§4.3:
+better-sqlite3's helper cannot back an async interface at all). It also lets `work`'s result be
+returned directly instead of smuggled through a closure past a `Promise<void>` task. Do **not**
+use `withExclusiveTransactionAsync` — it opens a second connection and throws on web.
 
 ### 4.3 `src/db/betterSqliteDriver.ts`
 
@@ -293,12 +297,14 @@ is the first row `migrations` will ever hold.
 4. A migration whose statements throw partway leaves the database with that migration neither
    applied nor recorded, and `migrate()` rejects.
 5. `npm run typecheck`, `npx jest` and `npm run export:check` all exit 0; the exported web bundle
-   contains no reference to `better-sqlite3` (`grep -ri better-sqlite3 dist/` finds nothing).
+   contains no reference to `better-sqlite3` (`grep -ri better-sqlite3 dist/` finds nothing) and
+   does contain the real `expo-sqlite` web worker plus an emitted `wa-sqlite*.wasm` asset — proof
+   the driver's import was bundled rather than stubbed away (§11).
 6. Launching in Expo Go runs migrations once at start and reaches the normal screen; a forced
    failure shows the error on screen rather than a blank one.
 7. `git diff main...HEAD --stat` touches only §3's files. `package.json`, `package-lock.json`,
    `tsconfig.json`, `app.json`, `index.ts`, `jest.config.js` and `.github/workflows/ci.yml` are
-   unchanged.
+   unchanged. `metro.config.js` is new (§11); no other config file appears in the diff.
 
 **App.tsx does change, minimally — ruling.** "Applies pending migrations on app start" is an
 acceptance criterion, and with no caller it is unverifiable on device; a foundation nobody has ever
@@ -395,3 +401,26 @@ alternative given, and lives here in §4.4/§5.1.
 4. **`scans` has no per-scan uniqueness or debounce.** A camera that fires the same barcode ten
    times a second writes ten rows. Whether dedupe belongs in the schema (a unique constraint), the
    scanner (#3), or the history query is a product decision, and I have assumed it is not this PR's.
+
+## 11. Amendments
+
+### 2026-09-02 — `metro.config.js` added (lead-programmer, app config)
+
+**What changed:** §2, §3 and §6 (items 5 and 7) now include `metro.config.js`. The original plan
+listed no config file and §9 implied none was needed.
+
+**Why:** `src/db/expoDriver.ts` is the first module in this repo to import `expo-sqlite`. That makes
+Metro's web graph reach `expo-sqlite/web/worker.ts`, which imports `./wa-sqlite/wa-sqlite.wasm`;
+Metro's default `assetExts` has no `wasm`, so `npm run export:check` fails with `Unable to resolve
+module ./wa-sqlite/wa-sqlite.wasm`. Verified by me: removing the file makes `export:check` exit 1
+with exactly that error; restoring it exits 0, bundling `worker-*.js` and emitting the `.wasm`.
+
+**Ruling — accepted.** It is the Expo-documented setup for `expo-sqlite` on web, six lines, adds no
+dependency and changes nothing about the Expo Go runtime. The alternative considered — an
+`expoDriver.web.ts` stub — would make `export:check` pass by proving less, which defeats the point
+of having the check catch exactly this. Deliberately **not** added: the COEP/COOP dev-server
+headers Expo documents alongside this. Web here is a bundle-health check, not a supported target
+(DECISIONS.md, "Pin to Expo SDK 54 / Expo Go"); adding headers we never exercise is cargo cult.
+
+**Do not delete `metro.config.js` as unused.** Nothing under `src/` references it, so it looks
+removable; removing it breaks `export:check` in a way that reads as a bundler flake.
