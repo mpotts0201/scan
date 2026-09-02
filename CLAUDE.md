@@ -55,12 +55,44 @@ then re-routed to the owning agent.
    (SDK/dependency changes, native modules), scope creep, lane violations,
    secrets, unhandled error paths, and missing DECISIONS.md entries.
    Findings come to you; you route fixes to the owning agent.
-6. You open the PR with `gh pr create` using the repo template. Fill in
-   "How to verify" (exact Expo Go steps) and "What I'm unsure about"
-   honestly — aggregate the agents' stated uncertainties there.
-7. **CI reviewer** runs on the PR. The human reviews, requests changes, and
-   is the only one who merges. Review comments are routed back to the
-   owning agent by lane, and pushed to the same branch.
+6. Run **code-reviewer** on the branch diff (`git diff main...HEAD`).
+   Route MUST findings to the owning agent by lane and re-run the gate;
+   SHOULD/NIT findings may ship, carried into the published review.
+7. Open the PR with `gh pr create` using the repo template ("How to
+   verify", "What I'm unsure about" filled honestly). Then publish the
+   code-reviewer's findings onto the PR as an inline review:
+
+   - Build `review.json`:
+     {
+       "event": "COMMENT",
+       "body": "<reviewer's 2-3 sentence summary + any findings that
+                could not be line-anchored>",
+       "comments": [
+         { "path": "src/db/products.ts", "line": 42, "side": "RIGHT",
+           "body": "SHOULD: <finding + suggestion>" }
+       ]
+     }
+   - Post it: `gh api repos/{owner}/{repo}/pulls/<n>/reviews --input review.json`
+   - Rules: `event` is always COMMENT (never APPROVE/REQUEST_CHANGES —
+     the human is the approver, and GitHub rejects self-approval anyway,
+     since the PR author and reviewer are the same account).
+     `line` must be a line present in the PR diff; if a finding points at
+     unchanged code, put it in the top-level `body` instead of forcing an
+     anchor. Prefix each inline comment with its severity (MUST/SHOULD/NIT).
+     Delete review.json afterward; never commit it.
+8. The human reviews (your inline comments + their own reading), requests
+   changes, and is the only one who merges. Review comments are routed
+   back to the owning agent by lane and pushed to the same branch.
+9. Addressing human review: fetch ALL feedback on the PR — inline diff
+   comments (`gh api repos/{owner}/{repo}/pulls/<n>/comments`), review
+   summaries (`.../pulls/<n>/reviews`), and conversation comments
+   (`gh pr view <n> --comments`). Treat each as a work item: route to the
+   owning agent by lane, re-run the full gate, push to the same branch
+   (never force-push a branch under review). Then reply to each inline
+   comment thread with what was done and the commit hash, or with the
+   reason if you believe the request is wrong — never silently skip one.
+   Questions in comments get answered in-thread, not with code.
+   Repeat until the human merges.
 
 ## Adjudication rules (when agents disagree)
 
