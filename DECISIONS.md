@@ -47,6 +47,29 @@ Node 22 is the single change that unblocks better-sqlite3 12.10+ and 13, and
 should widen this pin deliberately in its own issue rather than via
 `npm update`.
 
+**Amendment 2026-09-02 (issue #9) — Node 22; `better-sqlite3` widened to
+`^13.0.3`:** CI (`.github/workflows/ci.yml`) and the devcontainer
+(`.devcontainer/Dockerfile`) move from Node 20 to Node 22 LTS, and
+`better-sqlite3` moves from `~12.9.0` to `^13.0.3`. Node 20 reached upstream
+EOL on 2026-04-30, which is what the "Revisit when" above anticipated. The
+tilde is dropped, not merely widened: `better-sqlite3@13` is N-API
+(`NAPI_VERSION=10`), so it no longer downloads a per-Node-ABI prebuild via
+`prebuild-install` at install time — the platform/arch binaries ship inside the
+npm tarball (`prebuilds/linux-x64.node`), the package declares
+`gypfile: false`, and it has no `install` script at all. The failure mode the
+tilde guarded against — a patch release dropping our ABI and silently falling
+through to `node-gyp rebuild` — is therefore structurally impossible in 13.x,
+while the tilde would cost us the SQLite fixes upstream ships as patch
+releases. `@types/better-sqlite3` stays at `^9.6.0` (DefinitelyTyped latest;
+better-sqlite3 ships no `.d.ts` of its own, so it is still required).
+**Unchanged and still binding:** the Jest 29, `@types/jest` 29, RNTL 13,
+`react-test-renderer` 19.1.0 and `jest-expo@~54.0.18` pins above — those are
+coupled to `jest-expo@54`, not to the Node version, and nothing here revisits
+them. **Revisit when:** as above, plus — Node 22 itself goes EOL 2027-04-30
+(Node 24 is the active LTS and was the alternative considered; the N-API
+binary serves both, so the move is decoupled from this pin), or
+`better-sqlite3@14` appears and the caret needs re-deriving.
+
 ## 2026-09-02 — Pin to Expo SDK 54 / Expo Go; no dev builds
 
 **Decision:** The project targets Expo SDK 54 and runs exclusively in the
