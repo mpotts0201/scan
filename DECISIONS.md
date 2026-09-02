@@ -162,3 +162,54 @@ pattern as the author's prior project (LineCheck), where it proved out.
 transaction semantics differences between the two SQLite bindings showing
 up as passing-tests-failing-app), which would force integration checks on
 device.
+
+**Amendment 2026-09-02 (issue #2) — the interface is async-only; the
+better-sqlite3 driver is app code; transactions are explicit BEGIN/COMMIT:**
+Implementing the above surfaced three tradeoffs the original entry did not
+decide. (1) **Async-only interface.** `DbDriver` returns Promises from every
+method, because `expo-sqlite@16`'s API is async (`openDatabaseAsync`,
+`execAsync`, `runAsync`, `getAllAsync`, `withTransactionAsync`); better-sqlite3
+is synchronous and its driver returns already-resolved Promises. Instead of a
+sync interface with the expo driver blocking (impossible — its native calls are
+genuinely async) or two interface shapes. The cost is that Node tests `await`
+things that never yield, which reads slightly false. (2) **The better-sqlite3
+driver lives in `src/db/betterSqliteDriver.ts`, owned by lead-programmer**, not
+in `src/__tests__/` owned by test-programmer. It implements an app-defined
+contract and must stay in lockstep with the expo driver on details that are
+contract rather than scaffolding — better-sqlite3 returns `lastInsertRowid`
+where expo-sqlite returns `lastInsertRowId`, and the driver normalises it.
+Putting it in the test lane would force test-programmer to edit contract code
+on every interface change. It stays out of the bundle because nothing reachable
+from `index.ts`/`App.tsx` imports it; `npm run export:check` plus a
+`grep -ri better-sqlite3 dist/` is the mechanical proof, and that check is a
+release-gate item, not a convention. (3) **Transactions use explicit
+`BEGIN`/`COMMIT`/`ROLLBACK` via `exec` in both drivers**, not
+better-sqlite3's `db.transaction()` helper: verified in 13.0.3, that helper
+throws `Transaction function cannot return a promise` when handed an async
+function, so it cannot honour an async interface at all. Explicit statements are
+also exactly what `expo-sqlite`'s `withTransactionAsync` does internally, so the
+two drivers get identical semantics instead of merely similar ones. Given up:
+better-sqlite3's automatic savepoint nesting — nested transactions are
+unsupported in both drivers and throw from SQLite.
+**Revisit when:** as above, plus — `expo-sqlite` gains a stable sync API worth
+using on device (its `execSync`/`runSync` exist but block the JS thread), or a
+third driver appears (e.g. `node:sqlite`, which would let tests drop the
+better-sqlite3 devDependency and its native addon entirely — worth checking once
+it is out of Node's experimental status).
+
+**Amendment 2026-09-02 (issue #2) — `metro.config.js` adds `wasm` to
+`assetExts`:** `src/db/expoDriver.ts` is the first module to import
+`expo-sqlite`, which puts `expo-sqlite/web/worker.ts` and its
+`import './wa-sqlite/wa-sqlite.wasm'` in Metro's web graph. Metro's default
+`assetExts` excludes `.wasm`, so `npm run export:check` fails to resolve it
+(verified both ways). A six-line `metro.config.js` extending
+`expo/metro-config` with `config.resolver.assetExts.push('wasm')` — the
+Expo-documented setup for expo-sqlite on web — restores it. **Instead of**
+stubbing the driver behind `expoDriver.web.ts`, which would make `export:check`
+pass by proving less than before, or dropping the check. The COEP/COOP
+dev-server headers Expo documents alongside it are deliberately omitted: web is
+a bundle-health check here, not a supported target (see the Expo Go entry
+below), and headers we never exercise are cargo cult. **Revisit when:** web
+becomes a real target (then add the headers and test them), or Expo ships
+`wasm` in the default `assetExts`, making the file deletable — until then it
+must not be deleted as "unused" just because nothing under `src/` imports it.
