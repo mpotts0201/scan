@@ -16,6 +16,28 @@ Format:
 
 ---
 
+## 2026-09-02 — Test stack pinned to Jest 29 / RNTL 13 / better-sqlite3 12
+
+**Decision:** The test toolchain is pinned below latest: `jest@~29.7.0` +
+`@types/jest@^29`, `@testing-library/react-native@^13`, `better-sqlite3@^12`,
+and `jest-expo@~54.0.18` (the version `expo@54`'s bundledNativeModules pins).
+Install these with explicit version specs, not bare `npm install` / `expo
+install`, which resolve to latest.
+
+**Instead of:** Jest 30, RNTL 14, better-sqlite3 13.
+
+**Because:** `jest-expo@54` and `react-native@0.81.5` both depend on Jest 29
+internals (`babel-jest`, `jest-snapshot`, `@jest/globals`,
+`jest-environment-*` at `^29`); a Jest 30 runner over Jest 29 internals gives
+two copies of `expect` and transformer/snapshot interface mismatches. RNTL 14
+drops `react-test-renderer` for a new `test-renderer@^1` peer that jest-expo 54
+does not provide. `better-sqlite3@13` declares `engines: node >= 22` while
+local dev and CI run Node 20.
+
+**Revisit when:** The SDK pin moves off 54 (then re-derive the whole stack from
+the new `jest-expo`), or CI and local dev move to Node 22 (unblocks
+better-sqlite3 13).
+
 ## 2026-09-02 — Pin to Expo SDK 54 / Expo Go; no dev builds
 
 **Decision:** The project targets Expo SDK 54 and runs exclusively in the
