@@ -47,6 +47,48 @@ Node 22 is the single change that unblocks better-sqlite3 12.10+ and 13, and
 should widen this pin deliberately in its own issue rather than via
 `npm update`.
 
+**Amendment 2026-09-02 (issue #9) — Node 22; `better-sqlite3` widened to
+`^13.0.3`:** CI (`.github/workflows/ci.yml`) and the devcontainer
+(`.devcontainer/Dockerfile`) move from Node 20 to Node 22 LTS, and
+`better-sqlite3` moves from `~12.9.0` to `^13.0.3`. Node 20 reached upstream
+EOL on 2026-04-30, which is what the "Revisit when" above anticipated. The
+tilde is dropped, not merely widened: `better-sqlite3@13` is N-API
+(`NAPI_VERSION=10`), so it no longer downloads a per-Node-ABI prebuild via
+`prebuild-install` at install time — the platform/arch binaries ship inside the
+npm tarball (`prebuilds/linux-x64.node`). The failure mode the tilde guarded
+against — a patch release dropping our ABI and silently falling through to a
+source compile — is therefore gone, since no ABI-keyed asset remains to drop,
+while the tilde would cost us the SQLite fixes upstream ships as patch
+releases. One caveat found while implementing: 13.0.3 does declare
+`gypfile: false`, but npm 10 ignores it — arborist reads that field from the
+registry's abbreviated manifest, which omits it (npm/cli#9837) — and injects
+`node-gyp rebuild` as an install script anyway. That run compiles nothing
+(`binding.gyp` no-ops when a prebuild is present), but its configure step wants
+Node headers, so `.devcontainer/Dockerfile` sets `npm_config_nodedir=/usr/local`
+to use the headers `node:22` already ships rather than fetch from nodejs.org,
+which the container firewall blocks. Net: `npm ci` now depends on python3 and
+make (present in both `node:22` and `ubuntu-latest`) but never on a C++
+compile. `@types/better-sqlite3` stays at `^9.6.0` (DefinitelyTyped latest;
+better-sqlite3 ships no `.d.ts` of its own, so it is still required).
+**Instead of (for this amendment):** `better-sqlite3@^12.11.1` on Node 22 — at
+ABI 127 `prebuild-install` fetches the binary from GitHub release assets, which
+is literally zero node-gyp, but leaves us off the current major and back on
+ABI-keyed prebuilds — or blocking on npm/cli#9859 until it lands.
+**Honestly:** this reinstates a lighter form of the exact headers/toolchain
+dependency the original "Because" above avoided; accepted because the failure is
+now loud (missing headers → node-gyp's configure step fails outright) rather than
+a silent slow source compile, and because python3 and make are present in both
+`node:22` and `ubuntu-latest`.
+**Unchanged and still binding:** the Jest 29, `@types/jest` 29, RNTL 13,
+`react-test-renderer` 19.1.0 and `jest-expo@~54.0.18` pins above — those are
+coupled to `jest-expo@54`, not to the Node version, and nothing here revisits
+them. **Revisit when:** as above, plus — npm/cli#9859 ("honor `gypfile: false` on
+lockfile-driven installs") ships in the npm that Node 22 bundles, at which
+point the `npm_config_nodedir` line comes out of the Dockerfile; Node 22 itself
+goes EOL 2027-04-30 (Node 24 is the active LTS and was the alternative
+considered; the N-API binary serves both, so the move is decoupled from this
+pin), or `better-sqlite3@14` appears and the caret needs re-deriving.
+
 ## 2026-09-02 — Pin to Expo SDK 54 / Expo Go; no dev builds
 
 **Decision:** The project targets Expo SDK 54 and runs exclusively in the
