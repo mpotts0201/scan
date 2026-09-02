@@ -16,7 +16,18 @@ export function initDatabase(): Promise<DbDriver> {
   if (initPromise === null) {
     initPromise = (async (): Promise<DbDriver> => {
       const db = await openExpoDriver(DATABASE_NAME);
-      await migrate(db);
+      try {
+        await migrate(db);
+      } catch (error) {
+        try {
+          // Close the connection this failed attempt opened, so a retry after a
+          // rejected init does not leak one per call.
+          await db.close();
+        } catch {
+          // A failed close() must not mask the migration error.
+        }
+        throw error;
+      }
       return db;
     })().catch((error: unknown) => {
       initPromise = null;
