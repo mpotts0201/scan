@@ -16,6 +16,37 @@ Format:
 
 ---
 
+## 2026-09-02 — Test stack pinned to Jest 29 / RNTL 13 / better-sqlite3 12
+
+**Decision:** The test toolchain is pinned below latest: `jest@~29.7.0` +
+`@types/jest@^29`, `@testing-library/react-native@^13`,
+`better-sqlite3@~12.9.0` (tilde, not caret), and `jest-expo@~54.0.18` (the
+version `expo@54`'s bundledNativeModules pins). Install these with explicit
+version specs, not bare `npm install` / `expo install`, which resolve to
+latest.
+
+**Instead of:** Jest 30, RNTL 14, better-sqlite3 13 or `^12`.
+
+**Because:** `jest-expo@54` and `react-native@0.81.5` both depend on Jest 29
+internals (`babel-jest`, `jest-snapshot`, `@jest/globals`,
+`jest-environment-*` at `^29`); a Jest 30 runner over Jest 29 internals gives
+two copies of `expect` and transformer/snapshot interface mismatches. RNTL 14
+drops `react-test-renderer` for a new `test-renderer@^1` peer that jest-expo 54
+does not provide. For better-sqlite3, Node 20 imposes two ceilings: 13.x
+declares `engines: node >= 22`, and within 12.x, 12.10.0 "remove[d] EOL builds
+(Node.js v20, v23)" — 12.10.0+ publish no ABI 115 prebuild, so on Node 20 the
+install script falls through `prebuild-install` to `node-gyp rebuild`, making
+`npm ci` depend on a C++ toolchain and nodejs.org headers for a devDependency.
+`~12.9.0` is the widest range admitting only prebuild-bearing releases (12.9.1
+ships ABI 115 but was never published to npm).
+
+**Revisit when:** The SDK pin moves off 54 (then re-derive the whole stack from
+the new `jest-expo`), or CI and local dev move to Node 22. Node 20 went EOL in
+April 2026 — which is exactly why upstream dropped its prebuilds — so moving to
+Node 22 is the single change that unblocks better-sqlite3 12.10+ and 13, and
+should widen this pin deliberately in its own issue rather than via
+`npm update`.
+
 ## 2026-09-02 — Pin to Expo SDK 54 / Expo Go; no dev builds
 
 **Decision:** The project targets Expo SDK 54 and runs exclusively in the
