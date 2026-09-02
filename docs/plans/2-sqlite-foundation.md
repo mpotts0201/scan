@@ -424,3 +424,15 @@ headers Expo documents alongside this. Web here is a bundle-health check, not a 
 
 **Do not delete `metro.config.js` as unused.** Nothing under `src/` references it, so it looks
 removable; removing it breaks `export:check` in a way that reads as a bundler flake.
+
+## 12. Rulings (orchestrator, human-confirmed 2026-09-02)
+
+The human ruled on §10's open questions during review of PR #11:
+
+- **Newer-than-build schema (§10.2):** keep the loud failure for now; the wipe-vs-preserve decision is
+  **deferred to #6** (scan history), where the data-loss tradeoff becomes real.
+- **Scan dedupe (§10.4):** owned by the **scanner debounce in #3**. `scans` stays a raw log in which
+  every row is a real user intent; no schema constraint, no collapsing in the history query.
+- **`initDatabase()` memoisation (§10.3):** **keep the module-level memo.** No React context in this
+  or the next issues; tests use the better-sqlite3 driver directly and never need `initDatabase()`.
+- **Size:** the human granted a one-PR exception for the 562-line reviewable diff (§10.1).
