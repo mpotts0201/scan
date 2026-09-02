@@ -35,7 +35,7 @@ config. Anything routed there means scope has crept.
 | File | Action | Responsibility |
 |---|---|---|
 | `.github/workflows/ci.yml` | change | `node-version: 20` → `22`. One line. |
-| `.devcontainer/Dockerfile` | change | `FROM node:20` → `node:22` plus the now-false comment on line 15. Two lines. |
+| `.devcontainer/Dockerfile` | change | `FROM node:20` → `node:22`, the now-false comment on line 15, and one `npm_config_nodedir` `ENV` line (§4.4). |
 | `package.json` | change | `better-sqlite3` devDependency spec only. One line. |
 | `package-lock.json` | change | Lockfile result; excluded from the size budget. |
 | `DECISIONS.md` | change | Dated amendment on the existing "Test stack pinned…" entry. |
@@ -55,29 +55,50 @@ No TypeScript interface is added or changed, so there is no interface sketch.
   named by platform/arch (`prebuilds/linux-x64.node`), **not by Node ABI**.
 - **Prebuilds ship inside the npm tarball** (`files: ["prebuilds/**"]`; 8 binaries, ~16.5 MB
   unpacked). `linux-x64` (CI), `linuxmusl-*`, `darwin-*`, `win32-*` all confirmed present.
-- **No `install` script, and `gypfile: false`.** The `prebuild-install || node-gyp rebuild` line
-  that #1 §11 was written about no longer exists; `binding.gyp` additionally no-ops when a host
-  prebuild is present. Deps shrink to `node-addon-api@^8`; `engines: { node: ">=22" }`.
+- **`gypfile: false` is declared — and npm 10 ignores it.** The `prebuild-install || node-gyp
+  rebuild` install script #1 §11 was written about is gone, but `@npmcli/arborist`'s `rebuild.js`
+  (`#addToBuildSet`, npm 10.8.2) reads `gypfile` from the *registry* manifest, not the on-disk
+  `package.json`, and the abbreviated ("corgi") manifest has only `name, version, dependencies,
+  devDependencies, dist, engines`. So `gypfile !== false` holds, `isNodeGypPackage()` sees the
+  shipped `binding.gyp`, and npm injects `scripts.install = "node-gyp rebuild"` into every `install`
+  and `ci` (lockfile entries omit `gypfile` too). Upstream: better-sqlite3 #1503 (closed 2026-07-28,
+  the 13.0.2 fix that does not work) and #1516 (open 2026-08-20, confirming 13.0.3); root cause
+  npm/cli#9837 (open 2026-08-03), fix PR npm/cli#9859 unmerged. npm 11 gates the implicit script
+  behind `allowScripts`; Node 22 bundles npm 10, which runs it.
+- **That run compiles nothing, but is not free.** `binding.gyp`'s `'prebuild_exists%'` no-ops both
+  targets, so no compiler runs (0 `CXX`/`CC` lines) and no `.node` is built — `linux-x64.node` from
+  `prebuilds/` is what loads. node-gyp's *configure* still needs `python3` and fetches
+  `node-v22.x-headers.tar.gz` from nodejs.org unless `nodedir` is set (auto-detect keys off
+  `use_prefix_to_find_headers`, unset in official Node builds); `make` then builds nothing. `build/`
+  **is** created but holds no `*.node`. `.devcontainer/init-firewall.sh` does not allowlist
+  nodejs.org, so a literal `npm ci` on Node 22 in the devcontainer **fails** (reproduced: exit 1,
+  `EHOSTUNREACH`, 46 gyp lines); §4.4 fixes it. `ubuntu-latest` has python3/make and reaches
+  nodejs.org, so CI succeeds with the no-op run in the log.
+- Deps shrink to `node-addon-api@^8`; `engines: { node: ">=22" }`.
 
 **Why caret, overturning nothing.** #1 §4.3 chose tilde for one reason: in 12.x the prebuild was
 fetched at install time from GitHub release *assets* keyed by Node ABI, so any patch release could
 drop our ABI and silently fall through to a source compile — which is what 12.10.0 did. In 13.x that
-mechanism is gone: resolving the tarball and having the binary are the same event, the binary is not
-ABI-keyed, and npm has no path to invoke `node-gyp` at install. The hazard the tilde guarded against
-is structurally impossible, so tilde now buys nothing and costs patch-level SQLite fixes (upstream
-ships those as `better-sqlite3` patch releases). Caret stops at 14, where the story could change
-again. Residual risk accepted: a future 13.x could raise `engines` past our Node — npm only warns
-(`EBADENGINE`). The tripwire is already in the repo: a binary that will not load fails
-`sqlite-smoke.test.ts` loudly rather than degrading silently.
+mechanism is gone: resolving the tarball and having the binary are the same event, and the binary is
+not ABI-keyed. No patch release can drop "our ABI" — there is no ABI-keyed asset to drop — and the
+`node-gyp` run npm 10 injects compiles nothing regardless. The hazard the tilde guarded against is
+gone, so tilde buys nothing and costs the patch-level SQLite fixes upstream ships. Caret stops at
+14. Residual risk accepted: a future 13.x could raise `engines` past our Node, which npm only warns
+about (`EBADENGINE`) — but a binary that will not load fails `sqlite-smoke.test.ts` loudly.
+
+**A partial regression from #1's stance, accepted.** `npm ci` still needs no C++ toolchain, but it
+now needs `python3`, `make` and Node headers — weaker than the "no install script at all" this plan
+originally claimed. Accepted because both supported environments have all three (`node:22` ships
+headers at `/usr/local/include/node`; `ubuntu-latest` has python3/make and network) and failure is
+loud, not a silent slow compile. Revisited when npm/cli#9859 reaches Node 22's bundled npm: §4.4's
+`ENV` line is then deleted and this becomes true zero-gyp.
 
 ### 4.2 `@types/better-sqlite3` — unchanged at `^9.6.0`
 
-`9.6.0` is DefinitelyTyped `latest` and `^9.6.0` already resolves to it, so there is nothing to
-bump. `better-sqlite3@13.0.3` ships **no** `.d.ts` and declares no `types`/`typings` field (zero
-`.d.ts` entries in the tarball), so `@types/better-sqlite3` is **not** redundant — removing it
-breaks `npm run typecheck` with TS7016 under `strict`. Note for #2: the types lag the runtime by a
-major (13.0.0's `db.explain()` / `statement.toString()` are untyped); that is a later issue's
-problem, not this PR's.
+`9.6.0` is DefinitelyTyped `latest` and `^9.6.0` already resolves to it. `better-sqlite3@13.0.3`
+ships **no** `.d.ts` and declares no `types`/`typings` field, so `@types/better-sqlite3` is **not**
+redundant — removing it breaks `npm run typecheck` with TS7016 under `strict`. Note for #2: the
+types lag the runtime by a major (13.0.0's `db.explain()` / `statement.toString()` are untyped).
 
 ### 4.3 Install and verification commands (exact, under Node 22)
 
@@ -89,18 +110,25 @@ export PATH="$(dirname "$(npx -y node@22 -e 'console.log(process.execPath)')"):$
 node -v            # must print v22.x  (verified here: v22.23.2, npm 10.8.2)
 
 npm install --save-dev better-sqlite3@^13.0.3
-npm ci --loglevel=verbose 2>&1 | tee /tmp/npm-ci.log
+npm_config_nodedir=/usr/local npm ci --loglevel=verbose > /tmp/npm-ci.log 2>&1
+echo $?                                                   # expect 0 (~8 s; no pipe, so this is npm's)
 
-grep -ci gyp /tmp/npm-ci.log                              # expect 0
+grep -c 'node-gyp rebuild' /tmp/npm-ci.log                # expect exactly 1 — the injected script
+grep -cE '\b(CXX|CC)\b' /tmp/npm-ci.log                   # expect 0 — no compiler runs
+grep -ci nodejs.org /tmp/npm-ci.log                       # expect 0 — headers come from nodedir
 ls node_modules/better-sqlite3/prebuilds/linux-x64.node   # expect: exists
-ls node_modules/better-sqlite3/build                      # expect: No such file or directory
+find node_modules/better-sqlite3/build -name '*.node'     # expect: no output
 npx jest --ci && npm run typecheck && npm run export:check
 ```
 
+`npm_config_nodedir` is inline so this reproduces on any Node 22; the devcontainer gets it from
+§4.4's `ENV`. Measured on a scratch copy under v22.23.2: exit 0 in ~8 s, one gyp line, zero compiler
+lines, `build/` present and free of `.node`.
+
 Not `npx expo install` — `better-sqlite3` is not in `bundledNativeModules.json`, so it would resolve
 to latest and drop the explicit spec. Note the corrected path: 12.x compiled to
-`build/Release/better_sqlite3.node`; **13.x never creates `build/`**, so that directory existing is
-itself evidence a source compile happened.
+`build/Release/better_sqlite3.node`. In 13.x, `build/` existing is *not* by itself evidence of a
+compile — node-gyp's no-op run creates it. A `.node` file *inside* `build/` is. That is the check.
 
 Expected lockfile delta, so a reviewer can tell churn from drift (measured on a scratch copy):
 `better-sqlite3` 12.9.0 → 13.0.3, `node-addon-api` added, and **23 packages removed** — the whole
@@ -135,11 +163,26 @@ plus Dockerfile line 15, which would otherwise assert something false:
 +# 2026-04-30, Node 22 (Jod) is supported through 2027-04-30.
 ```
 
+plus, immediately after the existing `ENV EXPO_NO_TELEMETRY=1` line, the `nodedir` pointer keeping
+node-gyp's no-op configure step off the network (§4.1):
+
+```dockerfile
+# better-sqlite3@13 bundles prebuilt binaries, but npm 10 still runs a no-op
+# `node-gyp rebuild` at install (npm/cli#9837: `gypfile: false` is dropped from
+# the registry manifest). node-gyp's configure step then fetches Node headers
+# from nodejs.org, which the firewall blocks. Point it at the headers this image
+# already ships so `npm ci` works offline. Remove once npm/cli#9859 ships.
+ENV npm_config_nodedir=/usr/local
+```
+
+`/usr/local/include/node` is verified present in the current official `node:22` image. **CI stays
+unchanged** — on `ubuntu-latest` the headers download is the ordinary native-module path and is not
+blocked; a nodedir step there is out of scope.
+
 Nothing else in either file: no matrix, no caching change, no step reordering, no new apt packages.
 Expo's install docs state the requirement only as "Node.js (LTS)", no upper bound — and the full
 gate (`typecheck`, `jest --ci`, `expo export --platform web`) was run green on v22.23.2 against a
-scratch copy of this branch with `^13.0.3` applied before this plan was written, so the
-compatibility claim is measured, not inferred.
+scratch copy of this branch, so the compatibility claim is measured, not inferred.
 
 ## 5. Data model
 
@@ -148,34 +191,36 @@ compatibility claim is measured, not inferred.
 ## 6. Done means
 
 1. `ci.yml` has `node-version: 22` and is otherwise byte-identical to `main`; the Dockerfile is
-   `FROM node:22` with line 15 updated and no other change.
+   `FROM node:22` with line 15 updated and §4.4's `npm_config_nodedir` block added, nothing else.
 2. `package.json` records `"better-sqlite3": "^13.0.3"`; `@types/better-sqlite3` stays `^9.6.0`.
-3. `npm ci` on Node 22 installs from the bundled prebuild: no `gyp` in a verbose install log, no
-   `node_modules/better-sqlite3/build/`, no C++ toolchain, no nodejs.org download. Visible in the
-   CI log.
+3. `npm ci` on Node 22 loads the bundled prebuild and **compiles nothing**: no `CXX`/`CC` lines in a
+   verbose log, no `*.node` under `node_modules/better-sqlite3/build/`, no C++ compiler needed. One
+   no-op `node-gyp rebuild` line *is* expected (npm/cli#9837 — §4.1 and the Dockerfile comment);
+   that is what §9 Q0 asks the human to accept. In the devcontainer, no nodejs.org request is made
+   and `npm ci` succeeds behind the firewall.
 4. `npm run typecheck`, `npx jest --ci`, `npm run export:check` all green on Node 22 in CI; Jest is
    2 suites / 2 tests passing, unchanged.
 5. `expo`, `react-native`, `jest`, `jest-expo`, `@testing-library/react-native`,
    `react-test-renderer` and every runtime `dependency` are untouched in `package.json`, with
    unchanged lockfile entries.
 6. `git diff main...HEAD --stat`, excluding `package-lock.json` and `docs/plans/`, is **under ~40
-   lines** — four functional lines plus the DECISIONS.md amendment. No `.ts`/`.tsx` file is touched
-   at all. A larger diff means something out of scope got in.
+   lines** — five functional lines plus comments and the DECISIONS.md amendment. No `.ts`/`.tsx`
+   file is touched at all. A larger diff means something out of scope got in.
 
 ## 7. Test surface and DECISIONS.md
 
 No new tests: the existing suite *is* the test for this issue. `sqlite-smoke.test.ts` proves the
-N-API prebuilt binary loads inside the jest-expo RN-flavored environment under Node 22 and that SQL
-round-trips — 13.x's loader does strictly more work than 12.x's (`process.report.getReport()` for
-musl detection, `fs.existsSync` probing), so this is a real check, not a formality.
-`render-smoke.test.tsx` proves RNTL still renders headlessly on Node 22. test-programmer must
-**not** edit either file; a failure after the bump is a finding about the new binary, not a test to
-adjust.
+N-API prebuilt binary loads under Node 22 in the jest-expo environment and that SQL round-trips —
+13.x's loader does strictly more work than 12.x's (musl detection via `process.report.getReport()`,
+`fs.existsSync` probing), so this is a real check. `render-smoke.test.tsx` proves RNTL still renders
+headlessly. test-programmer must **not** edit either file; a failure after the bump is a finding
+about the new binary, not a test to adjust.
 
 DECISIONS.md gets no new entry — this is a foreseen revisit and the existing entry's "Revisit when"
 names it. The architect appends a dated **amendment block** to "2026-09-02 — Test stack pinned to
 Jest 29 / RNTL 13 / better-sqlite3 12" recording: Node 20 → 22 for CI and devcontainer;
-`~12.9.0` → `^13.0.3` with the N-API rationale for tilde → caret; and explicitly that the Jest 29 /
+`~12.9.0` → `^13.0.3` with the N-API rationale for tilde → caret; the npm/cli#9837 caveat and the
+devcontainer `npm_config_nodedir` line it forces (§4.1, §4.4); and explicitly that the Jest 29 /
 RNTL 13 / jest-expo 54 pins are unchanged and still binding. The original entry's text and title are
 not rewritten.
 
@@ -191,18 +236,51 @@ not rewritten.
 
 ## 9. Open questions
 
-Neither blocks the PR; both belong in the PR's "What I'm unsure about".
+**Q0 blocks marking the PR ready. Q1–Q3 belong in the PR's "What I'm unsure about".**
 
+0. **The AC "no `node-gyp` invocation (check the CI log)" cannot be met literally by any 13.x on
+   npm 10** — §4.1: npm injects the script from the registry manifest whatever `gypfile` says. The
+   substance holds (prebuilt binary, no compile, no C++ toolchain) but one `node-gyp rebuild` line
+   will appear in the log. Options:
+   - **(A) Ship as planned** — `^13.0.3` + §4.4's `ENV` line, AC amended to "no source compile" (no
+     compiler invocation, no `.node` under `build/`). Cost: python3 + make + headers, and one line
+     to delete when npm/cli#9859 ships.
+   - **(B) `better-sqlite3@^12.11.1` on Node 22 instead** — at ABI 127 `prebuild-install` fetches
+     the binary from GitHub releases, which the firewall allows: genuinely zero node-gyp, AC met
+     literally. Cost: stuck on 12.x and back on ABI-keyed prebuilds — the exact fragility #1 §11
+     documented — and the "widen to the current major" half of the issue goes unmet.
+   - **(C) Block on npm/cli#9859** — right in principle, unbounded in time. Node 20 is EOL *now*.
+
+   **Recommendation: (A).** The AC was a proxy for "installing a devDependency must not compile
+   C++"; (A) delivers that, while (B) buys a green grep by reintroducing the hazard the AC exists to
+   prevent. Bears on Q1: npm 11 (Node 24) gates the implicit script behind `allowScripts`, so on
+   Node 24 this is a warning and the AC is met literally — a second argument for 24 over 22.
 1. **Why 22 and not 24?** Node 24 (Krypton) is the *active* LTS until 2026-10-20 and supported to
    2028-04-30; Node 22 (Jod) has been in maintenance LTS since 2025-10-21 and ends 2027-04-30. The
    issue specifies 22, and `better-sqlite3@13` is N-API so the choice is not coupled to the pin —
    the same `linux-x64.node` serves both. Taking 22 means repeating this inside ~20 months; 24 is a
    one-character difference. Human call; the plan implements the issue as written.
-2. **The devcontainer change is unverifiable by any agent.** Only a human rebuilding the container
-   proves `FROM node:22` yields a working image. Everything measured here ran under `npx node@22`
-   (v22.23.2) inside the *existing* node:20 image; CI proves the `ubuntu-latest` +
-   `actions/setup-node` path. If a rebuild breaks, it will be for base-image tooling drift unrelated
-   to this diff, and the fix is a follow-up.
+2. **`FROM node:22` itself is unverifiable by any agent** — only a human rebuilding the container
+   proves the image works. Everything measured here ran under `npx node@22` (v22.23.2) inside the
+   *existing* node:20 image, and CI proves the `ubuntu-latest` path. The `npm_config_nodedir` value
+   is the one exception: `/usr/local/include/node` was confirmed in the pulled `node:22` image.
 3. **npm cache size.** 13.x ships all 8 platform prebuilds in one 11.4 MB tarball, where 12.9.0
    downloaded a single ABI-specific binary post-install. CI's `cache: npm` grows roughly that much.
    Not worth acting on; noted so it is not mistaken for a regression.
+
+## 10. Amendments
+
+### 2026-09-02 — npm 10 injects `node-gyp rebuild` regardless of `gypfile: false`
+
+**What changed:** §4.1 (mechanism; the accepted python3/make/headers dependency), §4.3 (real
+verification signature), §4.4 (`npm_config_nodedir=/usr/local` in the Dockerfile), §6 items 1/3/6,
+and a new §9 Q0. The caret decision is unchanged.
+
+**Why the original was wrong:** it claimed 13.0.3 has "no `install` script" so "npm has no path to
+invoke `node-gyp`". 13.0.3 does declare `gypfile: false`, but npm 10's arborist reads that field
+from the registry's abbreviated manifest, which omits it (npm/cli#9837), and injects the script
+anyway. **Failure mode:** test-programmer's `npm ci` in the devcontainer exited 1 with
+`EHOSTUNREACH` — node-gyp's configure fetching headers the install does not need, from a host the
+firewall blocks. Credit to them for tracing it to the manifest read rather than filing a flaky
+install. **Ruling:** point node-gyp at the headers `node:22` already ships rather than dropping back
+to 12.x; CI unchanged; the literal-AC conflict goes to the human as §9 Q0.
