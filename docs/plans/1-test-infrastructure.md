@@ -183,7 +183,7 @@ Resulting `devDependencies` (existing two entries unchanged, five/six added):
   "@types/better-sqlite3": "^9.6.0",
   "@types/jest": "^29.5.14",
   "@types/react": "~19.1.0",
-  "better-sqlite3": "^12.11.1",
+  "better-sqlite3": "~12.9.0",
   "jest": "~29.7.0",
   "jest-expo": "~54.0.18",
   "react-test-renderer": "19.1.0",
@@ -200,7 +200,7 @@ npx expo install jest-expo --dev
 # Not Expo-coupled. Explicit versions on purpose — see the pin rationale below.
 npm install --save-dev jest@~29.7.0 @types/jest@^29.5.14 \
   @testing-library/react-native@^13.3.3 react-test-renderer@19.1.0 \
-  better-sqlite3@^12.11.1 @types/better-sqlite3@^9.6.0
+  better-sqlite3@~12.9.0 @types/better-sqlite3@^9.6.0
 ```
 
 Do **not** run `npx expo install` for the second group. `expo install` only
@@ -231,12 +231,26 @@ today, not recalled):
   RNTL declares it as a *direct* peer and relying on a transitive hoist means a
   jest-expo patch release can break our install. One explicit line removes the
   coupling. Pinned exact to match `react@19.1.0`.
-- **`better-sqlite3@^12.11.1` — NOT `^13`.** `better-sqlite3@13.x` declares
-  `engines: { node: ">=22" }`; this repo and CI are on Node 20. `12.11.1`
-  declares `node: "20.x || 22.x || 23.x || 24.x || 25.x || 26.x"`. Installing
-  latest here fails or warns on Node 20 in CI. If someone later moves CI to
-  Node 22, v13 becomes available — that is a separate issue, and CI's Node
-  version must **not** change in this PR.
+- **`better-sqlite3@~12.9.0` — not `^12` (and not `^13`).** Two separate
+  ceilings, both caused by Node 20. (a) `better-sqlite3@13.x` declares
+  `engines: { node: ">=22" }`, so 13 is simply unavailable to us. (b) Within
+  12.x, **prebuilt binaries** for Node 20 (ABI 115) stop at 12.9.x: the
+  v12.10.0 release notes say "Add support for Node.js v26 prebuilds and remove
+  EOL builds (Node.js v20, v23)", and the release assets confirm it —
+  12.10.0 / 12.11.0 / 12.11.1 ship linux-x64 binaries for ABI 127/137/141/147
+  (Node 22+) only, while 12.9.0 / 12.8.0 / 12.6.2 still ship ABI 115.
+  `12.9.0` declares `engines: node "20.x || 22.x || 23.x || 24.x || 25.x"` and
+  has the same two deps (`bindings`, `prebuild-install`) as 12.11.1, so
+  nothing is given up but Node 26 support we cannot use.
+  `~12.9.0` (`>=12.9.0 <12.10.0`) is the widest range that admits **only**
+  releases carrying a Node 20 prebuild. Note that `v12.9.1` exists as a GitHub
+  tag and does ship ABI 115 assets, but it was **never published to npm**
+  (`npm view better-sqlite3@12.9.1` 404s), so `~12.9.0` resolves to 12.9.0
+  today and would pick up 12.9.1 only if it were ever published — which would
+  still be prebuild-bearing. Do not "helpfully" widen this to `^12`: that
+  resolves to 12.11.1 and reintroduces the source build described in §4.6.
+  When the repo moves to Node 22, this pin can go to `^12` or `^13` — a
+  separate issue; CI's Node version must **not** change in this PR.
 - **`@types/better-sqlite3@^9.6.0`** — `better-sqlite3` ships no `.d.ts` of its
   own (verified: no types/typings field, no `.d.ts` in the tarball). Under
   `strict`, importing it from a `.ts` test without types fails
@@ -304,13 +318,18 @@ Nothing else in the workflow changes — not the Node version, not the step
 order, not `npm ci`. The Tests step stays where it is (after Bundle builds); if
 we later want fast-fail ordering, that is its own issue.
 
-CI note (not a change, just an expectation to set): `npm ci` will now build or
-download a `better-sqlite3` binary. `prebuild-install || node-gyp rebuild`
-means ubuntu-latest will use a prebuilt Node 20 binary if one is published and
-otherwise compile from source with the toolchain already on the runner. Either
-way it works; the `npm ci` step may get noticeably slower. If it turns out
-*no* Node 20 prebuild is published for 12.11.1 and the compile is unacceptably
-slow, report it rather than adding a caching step in this PR.
+CI note (not a change, just an expectation to set): `npm ci` will now fetch a
+`better-sqlite3` binary. `better-sqlite3`'s install script is
+`prebuild-install || node-gyp rebuild`; because we pin `~12.9.0` (§4.3),
+`prebuild-install` **finds a published Node 20 (ABI 115) linux-x64 prebuild and
+downloads it** — the `node-gyp` fallback is never reached. So `npm ci` needs no
+C++ toolchain and no Node headers from nodejs.org, and the step cost is one
+small tarball download, not a compile.
+
+If a CI log ever shows `node-gyp rebuild` running for `better-sqlite3`, that is
+a signal the pin has been widened (or the environment's Node major changed),
+not a transient failure — fix the pin rather than adding a build-tools or
+caching step in this PR.
 
 ---
 
@@ -362,6 +381,11 @@ the implementation.
 9. No `.ts`/`.tsx` file outside `src/__tests__/` exists in the diff;
    `App.tsx`, `index.ts`, `app.json`, `tsconfig.json` and runtime
    `dependencies` are unchanged.
+10. A clean `npm ci` on Node 20 (locally and on the CI runner) installs
+    `better-sqlite3` **without invoking `node-gyp`** — the install log shows a
+    prebuild download, not a compile, and the install succeeds on a machine
+    with no C++ toolchain and no `--nodedir` flag. `package.json` records the
+    dependency as `"better-sqlite3": "~12.9.0"`.
 
 ---
 
@@ -426,12 +450,17 @@ a flake:
 
 > **2026-09-02 — Test stack pinned to Jest 29 / RNTL 13 / better-sqlite3 12**
 > Decision: `jest@~29.7.0`, `@testing-library/react-native@^13`,
-> `better-sqlite3@^12`, `jest-expo@~54.0.18` — none installed at latest.
-> Instead of: latest majors.
+> `better-sqlite3@~12.9.0`, `jest-expo@~54.0.18` — none installed at latest.
+> Instead of: latest majors (and, for better-sqlite3, `^12`).
 > Because: `jest-expo@54` and `react-native@0.81.5` depend on Jest 29
 > internals; RNTL 14 swaps `react-test-renderer` for a new `test-renderer`
-> peer; `better-sqlite3@13` requires Node >= 22 while CI runs Node 20.
-> Revisit when: the SDK pin moves off 54, or CI moves to Node 22.
+> peer; `better-sqlite3@13` requires Node >= 22, and 12.10.0+ dropped Node 20
+> prebuilds, so `^12` would make `npm ci` compile from source on Node 20.
+> Revisit when: the SDK pin moves off 54, or dev/CI move to Node 22 (Node 20
+> went EOL April 2026, which is why the prebuilds went away).
+
+The canonical wording lives in `DECISIONS.md`; the block above is a summary and
+was amended together with it on 2026-09-02 (§11).
 
 This entry has been appended to `DECISIONS.md` on this branch by the architect.
 Everything else in this issue is mechanical setup, not a tradeoff — no other
@@ -448,6 +477,63 @@ later, neither of which should stop this PR:
    step. Moving Tests earlier would fail faster. Left unchanged here because
    the issue says "keep the workflow otherwise unchanged"; say the word and it
    becomes a one-line follow-up.
-2. **Node 20 vs 22.** Staying on Node 20 is what caps `better-sqlite3` at v12.
-   That is fine indefinitely, but if the human wants Node 22 for other reasons,
-   doing it *before* issue #2 writes driver tests is cheaper than after.
+2. **Node 20 vs 22 — sharpened, and now load-bearing twice.** Node 20 reached
+   end of life upstream in **April 2026**. Staying on it now costs us two
+   coupled pins, not one: (a) `better-sqlite3@13` is unavailable
+   (`engines: node >= 22`), and (b) within 12.x we are additionally capped at
+   `~12.9.0`, because 12.10.0 dropped Node 20 prebuilds precisely *because*
+   Node 20 is EOL (§4.3). Pin (b) is the new one, and it is a ratchet: every
+   further upstream release moves further away from us, and the fallback when a
+   prebuild is missing is a `node-gyp` source build that makes a devDependency
+   install depend on a C++ toolchain and nodejs.org availability.
+   Moving local dev and CI to Node 22 removes both pins at once and unblocks
+   `better-sqlite3` 12.10+/13. This is a human decision (it touches the
+   development environment, not just the repo), it does **not** block this PR,
+   and doing it *before* issue #2 writes driver tests is cheaper than after —
+   after that, changing Node major means re-verifying the driver tests too.
+
+---
+
+## 11. Amendments
+
+### 2026-09-02 — `better-sqlite3` pinned to `~12.9.0`, not `^12.11.1`
+
+**What changed:** §4.2, §4.3, §4.6 and §6 (new done-means #10) now specify
+`better-sqlite3@~12.9.0`. The original plan said `^12.11.1`. §10's open
+question 2 was sharpened accordingly.
+
+**Why the original pin was wrong.** I pinned on `engines` alone, which was the
+wrong signal. `12.11.1` *declares* Node 20 support in `engines`, so it installs
+without a warning — but it ships **no Node 20 (ABI 115) prebuilt binary**.
+Upstream's v12.10.0 release notes: "Add support for Node.js v26 prebuilds and
+remove EOL builds (Node.js v20, v23)". Verified against the release assets:
+12.10.0 / 12.11.0 / 12.11.1 publish linux-x64 binaries for ABI 127/137/141/147
+only; 12.9.0 (and the npm-unpublished 12.9.1 tag) still publish ABI 115.
+
+**The concrete failure mode.** `better-sqlite3`'s install script is
+`prebuild-install || node-gyp rebuild`. On Node 20 with `^12.11.1`,
+`prebuild-install` finds nothing and silently falls through to `node-gyp
+rebuild`. That turns `npm ci` — a devDependency install — into a C++ compile
+that requires a toolchain on the machine *and* a successful header download
+from nodejs.org. test-programmer hit exactly this: the install only completed
+after passing a manual `--nodedir`. On `ubuntu-latest` it would most likely
+compile successfully but slowly, which is the worse outcome of the two: green
+CI hiding a build that is one nodejs.org outage, one runner-image change, or
+one fresh contributor machine away from a failure that reads as "tests are
+broken" rather than "the pin is wrong". A test-infrastructure PR whose whole
+job is to make the suite trustworthy must not make `npm ci` conditional on a
+compiler.
+
+**Why `~12.9.0` specifically.** It is the widest range admitting only releases
+that carry a Node 20 prebuild (`>=12.9.0 <12.10.0`). `~12.9.1` was considered —
+12.9.1's GitHub assets do include ABI 115 — but 12.9.1 was never published to
+npm, so that range is unresolvable. `^12` is not acceptable: it resolves to
+12.11.1 and reinstates the compile.
+
+**What this costs:** nothing we can use. 12.10.0+ adds Node 26 prebuilds and
+drops EOL builds; we are on Node 20. Deps are identical (`bindings`,
+`prebuild-install`).
+
+**Unblocking condition:** moving local dev and CI to Node 22 (see §10 Q2) makes
+12.10+ and 13.x available again; at that point this pin should be widened
+deliberately, in its own issue, not by an `npm update`.
