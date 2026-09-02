@@ -15,9 +15,18 @@ subagents below, adjudicate between them, and assemble the result into a PR.
 - **No backend.** Data lives in SQLite (`expo-sqlite`). The only external
   service is the Open Food Facts API, called cache-first through the SQLite
   layer, with a descriptive User-Agent header.
-- Small PRs (< ~400 changed lines). One issue per branch:
+- **One PR in flight, ever.** Before starting any issue, check
+  `gh pr list --state open`. If any PR is open (draft included), the only
+  permitted work is addressing its human review comments (step 9);
+  otherwise report that the PR awaits review and stop. Silence on a PR is
+  not approval. Branches are cut from freshly-pulled main only, never from
+  another feature branch. Parallel work happens only when the human
+  explicitly requests it in-session, naming the issue.
+- Small PRs (< ~400 changed lines, excluding lockfile and recorded
+  fixtures; 150–300 is the target). One issue per branch:
   `feat/<issue>-slug`. No drive-by refactors or dependency changes outside
-  the issue's scope.
+  the issue's scope. If a diff exceeds the limit, do not open the PR —
+  propose a split to the human instead.
 - Real tradeoffs get a dated entry in `DECISIONS.md`.
 
 ## Agents and lanes
@@ -29,10 +38,10 @@ lane requests it through you; it never makes the change itself.
 | Agent | Writes | Never touches |
 |---|---|---|
 | **architect** | `docs/plans/*.md`, proposed `DECISIONS.md` entries, interface sketches (type signatures only) | any `.ts`/`.tsx` implementation or test |
-| **lead-programmer** | app code: `src/**`, `App.tsx`, app config | anything matching `**/*.test.*`, `**/__tests__/**`, `jest.*`, test fixtures |
-| **test-programmer** | `**/*.test.*`, `**/__tests__/**`, `jest.config.*`, test fixtures/helpers | any file lead-programmer owns |
+| **lead-programmer** | app code: `src/**`, `App.tsx`, app config (`package.json` only for plan-approved dependencies) | anything matching `**/*.test.*`, `**/__tests__/**`, `jest.*`, test fixtures |
+| **test-programmer** | `**/*.test.*`, `**/__tests__/**`, `jest.config.*`, test fixtures/helpers (`package.json` only for test-tooling devDependencies) | any file lead-programmer owns |
 | **code-auditor** | nothing (read-only; reports findings to you) | everything |
-| **CI reviewer** | nothing (comments on the PR via Actions) | everything |
+| **code-reviewer** | nothing (read-only; findings published to the PR by you via `gh api`) | everything |
 
 Enforcement: before committing any agent's work, diff it against its lane.
 Out-of-lane changes are reverted, not merged, even if they look correct —
@@ -58,9 +67,10 @@ then re-routed to the owning agent.
 6. Run **code-reviewer** on the branch diff (`git diff main...HEAD`).
    Route MUST findings to the owning agent by lane and re-run the gate;
    SHOULD/NIT findings may ship, carried into the published review.
-7. Open the PR with `gh pr create` using the repo template ("How to
-   verify", "What I'm unsure about" filled honestly). Then publish the
-   code-reviewer's findings onto the PR as an inline review:
+7. Open the PR as a draft with `gh pr create --draft` using the repo
+   template ("How to verify", "What I'm unsure about" filled honestly;
+   body includes `Closes #<issue>`). Then publish the code-reviewer's
+   findings onto the PR as an inline review:
 
    - Build `review.json`:
      {
@@ -80,6 +90,9 @@ then re-routed to the owning agent.
      unchanged code, put it in the top-level `body` instead of forcing an
      anchor. Prefix each inline comment with its severity (MUST/SHOULD/NIT).
      Delete review.json afterward; never commit it.
+
+   Mark the PR ready (`gh pr ready`) only when the full gate is green;
+   otherwise leave it draft and report what's failing.
 8. The human reviews (your inline comments + their own reading), requests
    changes, and is the only one who merges. Review comments are routed
    back to the owning agent by lane and pushed to the same branch.
@@ -137,6 +150,7 @@ Specific rulings you will need often:
 - `npm run export:check`
 - Auditor pass completed, findings resolved or explicitly noted in the PR
 - Diff-vs-lane check for every agent's commits
+- Size check: reviewable diff within limits (see Hard project constraints)
 
 ## Commands
 
@@ -144,3 +158,5 @@ Specific rulings you will need often:
 - `npx jest` — tests (jest-expo, headless)
 - `npm run export:check` — bundle-health check (`expo export --platform web`)
 - `npx expo start` — dev server (human runs this on the host; agents never do)
+- `/next` — pick up the next workable issue and take it to draft PR
+  (see `.claude/commands/next.md`; it enforces the WIP limit and size guard)
