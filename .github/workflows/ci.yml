@@ -1,0 +1,30 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # npm ci = clean install from package-lock.json exactly.
+      # Requires package-lock.json to be committed (it should be).
+      - run: npm ci
+
+      - name: TypeScript
+        run: npm run typecheck
+
+      - name: Bundle builds
+        run: npm run export:check
+
+      # Uncomment once test-programmer has set up jest-expo (issue for it):
+      # - name: Tests
+      #   run: npx jest --ci

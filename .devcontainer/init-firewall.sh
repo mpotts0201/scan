@@ -74,7 +74,6 @@ ALLOWED_DOMAINS=(
     "claude.ai"                   # first-run OAuth login
     "console.anthropic.com"       # first-run OAuth login (API-key accounts)
     "sentry.io"                   # Claude Code error reporting
-    "statsig.anthropic.com"       # Claude Code feature flags
     "statsig.com"
 
     # --- npm / TypeScript / Jest ---------------------------------------------
@@ -99,8 +98,8 @@ for domain in "${ALLOWED_DOMAINS[@]}"; do
     echo "Resolving $domain..."
     ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
     if [ -z "$ips" ]; then
-        echo "ERROR: Failed to resolve $domain"
-        exit 1
+        echo "WARNING: Failed to resolve $domain — skipping (that service will be unreachable)"
+        continue
     fi
 
     while read -r ip; do
