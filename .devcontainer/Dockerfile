@@ -1,4 +1,4 @@
-FROM node:20
+FROM node:22
 
 ARG TZ
 ENV TZ="$TZ"
@@ -12,7 +12,8 @@ ENV TZ="$TZ"
 #   npx eslint .            (if configured)
 #   npx jest                (jest-expo runs component tests headlessly in Node)
 #   npm run export:check    (expo export --platform web = bundle-health check)
-# node:20 matches CI and Expo SDK 54's requirements.
+# node:22 matches CI. Expo SDK 54 requires "Node.js (LTS)"; Node 20 went EOL
+# 2026-04-30, Node 22 (Jod) is supported through 2027-04-30.
 # -----------------------------------------------------------------------------
 
 ARG CLAUDE_CODE_VERSION=latest
@@ -57,6 +58,13 @@ ENV DEVCONTAINER=true
 
 # Quality-of-life for Expo CLI inside a sandbox: no telemetry, no update nags
 ENV EXPO_NO_TELEMETRY=1
+
+# better-sqlite3@13 bundles prebuilt binaries, but npm 10 still runs a no-op
+# `node-gyp rebuild` at install (npm/cli#9837: `gypfile: false` is dropped from
+# the registry manifest). node-gyp's configure step then fetches Node headers
+# from nodejs.org, which the firewall blocks. Point it at the headers this image
+# already ships so `npm ci` works offline. Remove once npm/cli#9859 ships.
+ENV npm_config_nodedir=/usr/local
 
 # Create workspace and config directories and set permissions
 RUN mkdir -p /workspace /home/node/.claude && \
