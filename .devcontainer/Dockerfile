@@ -63,7 +63,9 @@ ENV EXPO_NO_TELEMETRY=1
 # `node-gyp rebuild` at install (npm/cli#9837: `gypfile: false` is dropped from
 # the registry manifest). node-gyp's configure step then fetches Node headers
 # from nodejs.org, which the firewall blocks. Point it at the headers this image
-# already ships so `npm ci` works offline. Remove once npm/cli#9859 ships.
+# already ships so `npm ci` no longer needs nodejs.org. Remove once the fix
+# (npm/cli#9859) ships in the npm that node:22 bundles; until then this line is
+# a silent no-op-preserver, nothing will fail to prompt its removal.
 ENV npm_config_nodedir=/usr/local
 
 # Create workspace and config directories and set permissions
