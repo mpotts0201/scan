@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import type { DbDriver, SqlParams, SqlValue } from './driver';
 
 /** Node/test-only. Never imported from App.tsx or index.ts, so Metro never bundles it. */
-export function openBetterSqliteDriver(filename = ':memory:'): Promise<DbDriver> {
+export async function openBetterSqliteDriver(filename = ':memory:'): Promise<DbDriver> {
   const db = new Database(filename);
 
   // Every method is `async` even though better-sqlite3 is synchronous: that is
@@ -49,5 +49,5 @@ export function openBetterSqliteDriver(filename = ':memory:'): Promise<DbDriver>
     },
   };
 
-  return Promise.resolve(driver);
+  return driver;
 }
