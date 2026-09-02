@@ -48,17 +48,12 @@ describe('products table', () => {
       '{}',
       1,
     ]);
-    // Wrapped in an async closure (matching real call sites, which always
-    // `await` a driver call from inside an async function): the interface
-    // is `Promise<RunResult>`, and awaiting is what turns a synchronous
-    // throw into a rejection.
     await expect(
-      (async () =>
-        db.run('INSERT INTO products (barcode, off_json, fetched_at) VALUES (?, ?, ?)', [
-          '111',
-          '{}',
-          2,
-        ]))(),
+      db.run('INSERT INTO products (barcode, off_json, fetched_at) VALUES (?, ?, ?)', [
+        '111',
+        '{}',
+        2,
+      ]),
     ).rejects.toThrow();
   });
 });
